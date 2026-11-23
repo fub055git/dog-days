@@ -36,4 +36,4 @@ A personal puppy app (PWA) for an English Staffy on the Gold Coast. It's built l
 
 ## Not done
 - Not deployed. To use it on the phone it needs hosting, e.g. a GitHub repo with Pages like the gym tracker.
-- iPhone home-screen icons need a PNG; the SVG icon works in browsers but iOS may show a screenshot instead (the gym tracker has the same limit).
+- Icons: `node build-icons.mjs` redraws apple-touch-icon.png (180 px, square; iOS rounds it) and icon-192/512.png from the same shapes as icon.svg. Re-run it if icon.svg changes.

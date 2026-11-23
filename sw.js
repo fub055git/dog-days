@@ -1,6 +1,6 @@
 // Same pattern as the gym tracker. Bump CACHE_NAME whenever app.js, logic.js and index.html change together.
-const CACHE_NAME = 'dog-days-v2';
-const ASSETS = ['./', './index.html', './style.css', './logic.js', './app.js', './manifest.json', './icon.svg'];
+const CACHE_NAME = 'dog-days-v3';
+const ASSETS = ['./', './index.html', './style.css', './logic.js', './app.js', './manifest.json', './icon.svg', './apple-touch-icon.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE_NAME).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))));
