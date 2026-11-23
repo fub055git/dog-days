@@ -9,7 +9,8 @@ A personal puppy app (PWA) for an English Staffy on the Gold Coast. It's built l
 - **Care:** a schedule worked out from the birthday and homecoming date: first vet check, microchip transfer, 3 puppy vaccinations (4 weeks apart, the last at 16 weeks or older) and then a yearly check, worming (fortnightly to 12 weeks, monthly to 6 months, then every 3 months), flea/tick/heartworm on your product's interval, council registration (12 weeks + 14 days, renewal 31 Aug), a desexing chat and weigh-ins. It also exports an .ics calendar file.
 - **Walk weather:** a live Open-Meteo hourly forecast for your suburb, run through Paw Window's heat model (dog apparent temperature + footpath heating). It shows a 5 am–9 pm strip and good walk times.
 - **Fireworks:** the Qld open-data list of upcoming displays (RSHQ), filtered to within N km of your suburb over the next 14 days. Suburbs are geocoded with Open-Meteo and cached. It exports an .ics file with an alert 2 hours before each display.
-- **Settings:** dog profile, contacts, an emergency card (tap to call), a sitter sheet (share/copy), the checklist, and backup save/restore.
+- **Photos:** a photo diary on the Log tab (choose several at once from the library or camera). Each is dated from its EXIF "taken" date (else today) and shown with the age and the weight logged nearest that day; you can edit the date and note. Any photo can be the profile photo, shown in the header and on the emergency card. Photos are shrunk to 1600 px (360 px thumbnails) and kept in IndexedDB (`dog-days` db, `photos` store), not localStorage, and are NOT in the backup file.
+- **Settings:** dog profile and photo, contacts, an emergency card (tap to call), a sitter sheet (share/copy), the checklist, and backup save/restore.
 
 ## Files
 - `logic.js`: pure rules and content (dates, care schedule, training plans, heat model, fireworks parsing, .ics, sitter text). It's also a CommonJS module for tests.

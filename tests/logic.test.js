@@ -245,3 +245,70 @@ test('calendar lines are folded at 75 octets and a later export has a higher SEQ
   const seq = (s) => Number(s.match(/SEQUENCE:(\d+)/)[1]);
   assert.ok(seq(L.buildICS(ev, new Date('2026-11-27T00:00:00Z'))) > seq(ics));
 });
+
+// ---- photos ----
+
+// Builds a minimal JPEG with an APP1 EXIF block: IFD0 (optionally DateTime + ExifIFD pointer) and an
+// Exif IFD with DateTimeOriginal. Offsets follow the TIFF spec; `le` picks byte order.
+function fakeJpeg({ original, modified, le = false, junkFirst = false }) {
+  const tiff = [];
+  const w16 = (n) => (le ? tiff.push(n & 255, n >> 8) : tiff.push(n >> 8, n & 255));
+  const w32 = (n) => (le ? tiff.push(n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24) : tiff.push(n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255));
+  const str = (s) => [...s, '\0'].map((c) => c.charCodeAt(0));
+  const ifd0Count = (modified ? 1 : 0) + (original ? 1 : 0);
+  const ifd0Size = 2 + ifd0Count * 12 + 4;
+  const exifIfdAt = 8 + ifd0Size;
+  const exifIfdSize = original ? 2 + 12 + 4 : 0;
+  let dataAt = exifIfdAt + exifIfdSize;
+  tiff.push(...(le ? [0x49, 0x49] : [0x4d, 0x4d])); w16(42); w32(8);
+  w16(ifd0Count);
+  const data = [];
+  if (modified) { w16(0x0132); w16(2); w32(20); w32(dataAt); data.push(...str(modified)); dataAt += 20; }
+  if (original) { w16(0x8769); w16(4); w32(1); w32(exifIfdAt); }
+  w32(0);
+  if (original) { w16(1); w16(0x9003); w16(2); w32(20); w32(dataAt); w32(0); data.push(...str(original)); }
+  const body = [...[0x45, 0x78, 0x69, 0x66, 0, 0], ...tiff, ...data];
+  const app1 = [0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 255, ...body];
+  const junk = junkFirst ? [0xff, 0xe0, 0, 6, 0x4a, 0x46, 0x49, 0x46] : [];
+  return new Uint8Array([0xff, 0xd8, ...junk, ...app1, 0xff, 0xda, 0, 2]).buffer;
+}
+
+test('exifDate reads DateTimeOriginal, falls back to DateTime, handles both byte orders', () => {
+  assert.equal(L.exifDate(fakeJpeg({ original: '2026:12:05 09:14:00' })), '2026-12-05');
+  assert.equal(L.exifDate(fakeJpeg({ original: '2026:12:05 09:14:00', le: true })), '2026-12-05');
+  assert.equal(L.exifDate(fakeJpeg({ original: '2026:12:05 09:14:00', modified: '2027:01:01 00:00:00', junkFirst: true })), '2026-12-05');
+  assert.equal(L.exifDate(fakeJpeg({ modified: '2027:01:02 10:00:00', le: true })), '2027-01-02');
+});
+
+test('exifDate returns null for non-JPEG, no EXIF, blank dates and truncated files', () => {
+  assert.equal(L.exifDate(new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer), null);
+  assert.equal(L.exifDate(new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2]).buffer), null);
+  assert.equal(L.exifDate(fakeJpeg({ original: '0000:00:00 00:00:00' })), null);
+  const full = new Uint8Array(fakeJpeg({ original: '2026:12:05 09:14:00' }));
+  assert.equal(L.exifDate(full.slice(0, 30).buffer), null);
+  assert.equal(L.exifDate(new ArrayBuffer(0)), null);
+});
+
+test('fitSize scales the longest side down, never up', () => {
+  assert.deepEqual(L.fitSize(4032, 3024, 1600), { w: 1600, h: 1200 });
+  assert.deepEqual(L.fitSize(3024, 4032, 1600), { w: 1200, h: 1600 });
+  assert.deepEqual(L.fitSize(800, 600, 1600), { w: 800, h: 600 });
+  assert.deepEqual(L.fitSize(10000, 10, 300), { w: 300, h: 1 });
+});
+
+test('nearestWeight picks the closest weigh-in within the window', () => {
+  const log = [
+    { type: 'weight', t: '2026-12-01T09:00', kg: 5.2 },
+    { type: 'weight', t: '2026-12-08T09:00', kg: 6.1 },
+    { type: 'wee', t: '2026-12-06T09:00' },
+  ];
+  assert.equal(L.nearestWeight(log, '2026-12-06'), 6.1);
+  assert.equal(L.nearestWeight(log, '2026-12-03'), 5.2);
+  assert.equal(L.nearestWeight(log, '2026-12-30'), null);
+  assert.equal(L.nearestWeight([], '2026-12-01'), null);
+});
+
+test('sortPhotos: newest date first, then most recently added', () => {
+  const s = L.sortPhotos([{ id: 'a', date: '2026-12-01', added: 1 }, { id: 'b', date: '2026-12-05', added: 2 }, { id: 'c', date: '2026-12-01', added: 3 }]);
+  assert.deepEqual(s.map((p) => p.id), ['b', 'c', 'a']);
+});

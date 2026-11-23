@@ -54,13 +54,105 @@
     clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2200);
   }
   function sheet(html) { $('#sheet-body').innerHTML = html; $('#sheet').classList.add('open'); const f = $('#sheet-body input, #sheet-body select'); if (f) f.focus(); }
-  function closeSheet() { $('#sheet').classList.remove('open'); }
+  function closeSheet() {
+    $('#sheet').classList.remove('open');
+    if (fullURL) { URL.revokeObjectURL(fullURL); fullURL = null; }
+  }
+
+  // ---------- photos (IndexedDB: photos are too big for localStorage) ----------
+  // Record: { id, date 'YYYY-MM-DD', note, added (ms), full: Blob (≤1600 px JPEG), thumb: Blob (≤360 px) }.
+  // Not in the backup file: the originals stay in the camera roll.
+  const PhotoDB = (() => {
+    let dbp = null;
+    const open = () => (dbp ||= new Promise((res, rej) => {
+      const r = indexedDB.open('dog-days', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'id' });
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => { dbp = null; rej(r.error); };
+    }));
+    const run = async (mode, fn) => {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction('photos', mode);
+        const req = fn(t.objectStore('photos'));
+        t.oncomplete = () => res(req && req.result);
+        t.onerror = () => rej(t.error);
+        t.onabort = () => rej(t.error || new Error('storage aborted'));
+      });
+    };
+    return { all: () => run('readonly', (s) => s.getAll()), put: (o) => run('readwrite', (s) => s.put(o)), del: (id) => run('readwrite', (s) => s.delete(id)) };
+  })();
+  let photos = [];            // records, loaded once at start
+  const thumbURLs = new Map(); // id → object URL of the thumbnail
+  let fullURL = null;          // object URL of the photo open in the sheet
+  const thumbURL = (id) => {
+    const p = photos.find((x) => x.id === id); if (!p) return null;
+    if (!thumbURLs.has(id)) thumbURLs.set(id, URL.createObjectURL(p.thumb));
+    return thumbURLs.get(id);
+  };
+  const profilePhoto = () => (S.profile.photoId ? thumbURL(S.profile.photoId) : null);
+
+  function loadImage(blob) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(blob), img = new Image();
+      img.onload = () => res({ img, url });
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('not an image this browser can read')); };
+      img.src = url;
+    });
+  }
+  // Browsers apply the EXIF rotation when drawing, so portrait phone photos stay upright.
+  function scaled(img, max, quality) {
+    const { w, h } = L.fitSize(img.naturalWidth, img.naturalHeight, max);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('could not shrink the photo'))), 'image/jpeg', quality));
+  }
+  async function addPhotoFile(file) {
+    const date = L.exifDate(await file.slice(0, 256 * 1024).arrayBuffer()) || today();
+    const { img, url } = await loadImage(file);
+    try {
+      const rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), date, note: '', added: Date.now(),
+        full: await scaled(img, 1600, 0.85), thumb: await scaled(img, 360, 0.8) };
+      await PhotoDB.put(rec);
+      photos.push(rec);
+      return rec;
+    } finally { URL.revokeObjectURL(url); }
+  }
+  async function addPhotos(files, asProfile) {
+    let ok = 0, last = null;
+    const failed = [];
+    for (const f of files) {
+      try { last = await addPhotoFile(f); ok++; } catch (e) { failed.push(f.name || 'a photo'); }
+    }
+    if (asProfile && last) { S.profile.photoId = last.id; save('profile'); }
+    // Ask the browser to keep this site's storage even when the phone is short on space.
+    if (ok && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    toast(failed.length ? `Added ${ok}; couldn't read ${failed.join(', ')}` : asProfile ? 'Profile photo set' : `Added ${ok} photo${ok === 1 ? '' : 's'}`);
+    render();
+  }
+  function openPhoto(id) {
+    const p = photos.find((x) => x.id === id); if (!p) return;
+    if (fullURL) URL.revokeObjectURL(fullURL);
+    fullURL = URL.createObjectURL(p.full);
+    const kg = L.nearestWeight(S.log, p.date);
+    const age = S.profile.birthday && p.date >= S.profile.birthday ? L.ageText(S.profile.birthday, p.date) : '';
+    sheet(`<img class="photo-full" src="${fullURL}" alt="">
+      <p class="muted">${esc([fmtDate(p.date), age, kg ? `${kg} kg` : ''].filter(Boolean).join(' · '))}</p>
+      <div class="form-row"><label class="block">Date<input id="ph-date" type="date" value="${p.date}" max="${today()}"></label></div>
+      <label class="block">Note<input id="ph-note" value="${esc(p.note)}" placeholder="First beach trip, new collar…"></label>
+      <div class="form-row"><button class="btn" data-act="photo-save" data-id="${p.id}">Save</button>
+      <button class="btn ghost" data-act="photo-profile" data-id="${p.id}" ${S.profile.photoId === p.id ? 'disabled' : ''}>${S.profile.photoId === p.id ? 'Profile photo' : 'Use as profile photo'}</button></div>
+      <button class="link danger" data-act="photo-del" data-id="${p.id}">Delete photo</button>`);
+  }
 
   function header() {
     const p = S.profile;
     const sub = dogHome() ? L.ageText(p.birthday, today()) : p.homeDate ? `Comes home ${relDays(p.homeDate)}` : 'Getting ready';
     $('#title').textContent = p.name || 'Dog Days';
     $('#subtitle').textContent = sub;
+    const src = profilePhoto(), av = $('#avatar');
+    av.hidden = !src;
+    if (src && av.getAttribute('src') !== src) av.src = src;
   }
 
   function render() {
@@ -328,7 +420,13 @@
     S.log.slice().sort((a, b) => (a.t < b.t ? 1 : -1)).slice(0, 200).forEach((e) => { (days[e.t.slice(0, 10)] ||= []).push(e); });
     const last7 = Object.keys(days).slice(0, 7);
     const toiletDays = last7.map((d) => ({ d, out: days[d].filter((e) => e.type === 'wee' || e.type === 'poo').length, acc: days[d].filter((e) => e.type === 'accident').length }));
+    const diary = L.sortPhotos(photos);
     return `
+      <section class="card"><h2>Photo diary</h2>
+        <label class="btn">Choose photos<input id="photo-input" type="file" accept="image/*" multiple hidden></label>
+        ${diary.length ? `<div class="photos">${diary.map((p) => `<button class="ph" data-act="photo-open" data-id="${p.id}"><img src="${thumbURL(p.id)}" alt="" loading="lazy"><small>${esc(fmtDate(p.date))}</small></button>`).join('')}</div>`
+          : '<p class="muted">Pick photos from your library or take one. Each is dated from when it was taken and shown with the weight logged nearest that day.</p>'}
+        <p class="tiny">Photos stay on this phone and aren't in the backup file; the originals stay in your camera roll.</p></section>
       <section class="card"><h2>Add an entry</h2>
         <div class="form-row"><select id="new-type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
         <input id="new-time" type="datetime-local" value="${localStamp()}"></div>
@@ -361,7 +459,9 @@
     const p = S.profile;
     const items = schedule();
     const sitter = L.sitterText(p, items, today());
+    const pic = profilePhoto();
     const em = `<section class="card emergency"><h2>Emergency</h2>
+      ${pic ? `<img class="em-photo" src="${pic}" alt="${esc(p.name || 'Your dog')}">` : ''}
       ${p.vetPhone ? `<a class="call" href="tel:${esc(p.vetPhone.replace(/\s/g, ''))}">📞 Vet: ${esc(p.vetName || '')} ${esc(p.vetPhone)}</a>` : '<p class="muted">Add your vet below.</p>'}
       ${p.emPhone ? `<a class="call" href="tel:${esc(p.emPhone.replace(/\s/g, ''))}">🚑 24-hour vet: ${esc(p.emName || '')} ${esc(p.emPhone)}</a>` : '<p class="muted">Add the nearest 24-hour emergency vet below.</p>'}
       <a class="call" href="tel:1300869738">☠️ Animal Poisons Helpline 1300 869 738</a>
@@ -369,6 +469,8 @@
       ${p.chip ? `<p>Microchip: <b>${esc(p.chip)}</b></p>` : ''}</section>`;
     const ready = `<section class="card" id="ready"><h2>Getting-ready checklist</h2>${L.READY.map((g) => `<h3>${g.group}</h3>${g.items.map((i) => `<label class="check"><input type="checkbox" data-act="ready" data-item="${esc(i.t)}" ${S.ready[i.t] ? 'checked' : ''}><span><b>${esc(i.t)}</b><br><small>${esc(i.d)}</small></span></label>`).join('')}`).join('')}</section>`;
     const profile = `<section class="card"><h2>Your dog</h2>
+      <div class="profile-pic">${pic ? `<img src="${pic}" alt="">` : '<span>🐶</span>'}
+        <label class="btn ghost sm">${pic ? 'Change photo' : 'Choose photo'}<input id="profile-photo-input" type="file" accept="image/*" hidden></label></div>
       ${field('name', 'Name')}${field('breed', 'Breed')}
       <div class="form-row">${field('birthday', 'Birthday', 'date')}${field('homeDate', 'Homecoming day', 'date')}</div>
       <div class="form-row"><label class="block">Coat<select data-prof="coat"><option value="">Light or mixed</option><option value="dark" ${p.coat === 'dark' ? 'selected' : ''}>Dark (black, brindle)</option></select></label>
@@ -491,6 +593,23 @@
       else { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (e) { toast('Copy failed'); } }
     } else if (a === 'copy') {
       try { await navigator.clipboard.writeText(L.sitterText(S.profile, schedule(), today())); toast('Copied'); } catch (e) { toast('Copy failed'); }
+    } else if (a === 'photo-open') openPhoto(b.dataset.id);
+    else if (a === 'photo-save' || a === 'photo-profile') {
+      const p = photos.find((x) => x.id === b.dataset.id); if (!p) return;
+      const date = $('#ph-date').value, note = $('#ph-note').value.trim();
+      if (date) p.date = date;
+      p.note = note;
+      try { await PhotoDB.put(p); } catch (e) { return toast('Could not save: storage is full or blocked'); }
+      if (a === 'photo-profile') { S.profile.photoId = p.id; save('profile'); }
+      closeSheet(); toast(a === 'photo-profile' ? 'Profile photo set' : 'Saved'); render();
+    } else if (a === 'photo-del') {
+      if (!confirm('Delete this photo from the app? The original in your camera roll is not affected.')) return;
+      const id = b.dataset.id;
+      try { await PhotoDB.del(id); } catch (e) { return toast('Could not delete'); }
+      photos = photos.filter((x) => x.id !== id);
+      if (thumbURLs.has(id)) { URL.revokeObjectURL(thumbURLs.get(id)); thumbURLs.delete(id); }
+      if (S.profile.photoId === id) { delete S.profile.photoId; save('profile'); }
+      closeSheet(); toast('Photo deleted'); render();
     } else if (a === 'export') {
       const data = { app: 'dog-days', version: 1, saved: new Date().toISOString() };
       BACKUP_KEYS.forEach((k) => { data[k] = S[k]; });
@@ -535,7 +654,10 @@
       S.enabled = t.checked ? [...new Set([...S.enabled, id])] : S.enabled.filter((x) => x !== id);
       save('enabled'); render();
     } else if (t.dataset.act === 'note') { S.notes[t.dataset.plan] = t.value; save('notes'); }
-    else if (t.id === 'import') {
+    else if (t.id === 'photo-input' || t.id === 'profile-photo-input') {
+      const files = [...t.files]; t.value = '';
+      if (files.length) { toast(files.length > 1 ? `Adding ${files.length} photos…` : 'Adding photo…'); addPhotos(files, t.id === 'profile-photo-input'); }
+    } else if (t.id === 'import') {
       const f = t.files[0]; if (!f) return;
       f.text().then((txt) => {
         const d = JSON.parse(txt);
@@ -560,5 +682,8 @@
   $('#sheet-close').addEventListener('click', closeSheet);
 
   render();
+  // Photos load after the first paint; if storage is unavailable the rest of the app still works.
+  PhotoDB.all().then((list) => { photos = list || []; if (photos.length || S.profile.photoId) render(); })
+    .catch(() => { photos = []; });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

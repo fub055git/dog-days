@@ -410,7 +410,66 @@
     return L.join('\n');
   }
 
+  // ---------- photos ----------
+  // Scale (w, h) down so the longest side is at most max; never scales up.
+  function fitSize(w, h, max) {
+    const k = Math.min(1, max / Math.max(w, h));
+    return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) };
+  }
+
+  // Date a JPEG photo was taken, from EXIF DateTimeOriginal (or DateTime), as 'YYYY-MM-DD'; null if absent.
+  // iPhone hands web pages JPEGs (it converts HEIC when picking), usually with EXIF kept.
+  function exifDate(buf) {
+    const v = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    if (v.byteLength < 4 || v.getUint16(0) !== 0xffd8) return null;
+    let off = 2;
+    while (off + 4 <= v.byteLength) {
+      const marker = v.getUint16(off);
+      if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) return null; // bad marker or image data started
+      const len = v.getUint16(off + 2);
+      if (marker === 0xffe1 && off + 10 <= v.byteLength && v.getUint32(off + 4) === 0x45786966) return readExif(v, off + 10, off + 2 + len);
+      off += 2 + len;
+    }
+    return null;
+  }
+  function readExif(v, tiff, end) {
+    try {
+      const le = v.getUint16(tiff) === 0x4949;
+      const u16 = (o) => v.getUint16(o, le), u32 = (o) => v.getUint32(o, le);
+      const entries = (ifd) => { const n = u16(tiff + ifd); return Array.from({ length: n }, (_, i) => tiff + ifd + 2 + i * 12); };
+      const ascii = (e) => {
+        const count = u32(e + 4), at = count > 4 ? tiff + u32(e + 8) : e + 8;
+        let s = ''; for (let i = 0; i < count - 1 && at + i < end; i++) s += String.fromCharCode(v.getUint8(at + i));
+        return s;
+      };
+      const ifd0 = entries(u32(tiff + 4));
+      let found = null;
+      const exifPtr = ifd0.find((e) => u16(e) === 0x8769);
+      if (exifPtr) { const e = entries(u32(exifPtr + 8)).find((x) => u16(x) === 0x9003); if (e) found = ascii(e); }
+      if (!found) { const e = ifd0.find((x) => u16(x) === 0x0132); if (e) found = ascii(e); }
+      const m = found && found.match(/^(\d{4}):(\d{2}):(\d{2})/);
+      return m && m[1] !== '0000' ? `${m[1]}-${m[2]}-${m[3]}` : null;
+    } catch (e) { return null; }
+  }
+
+  // Weight logged closest to `date`, within `days` either side; null if none.
+  function nearestWeight(log, date, days = 7) {
+    let best = null;
+    for (const e of log) {
+      if (e.type !== 'weight' || !(e.kg > 0)) continue;
+      const d = Math.abs(diffDays(e.t.slice(0, 10), date));
+      if (d <= days && (!best || d < best.d)) best = { kg: e.kg, d };
+    }
+    return best ? best.kg : null;
+  }
+
+  // Diary order: newest date first, then most recently added.
+  function sortPhotos(list) {
+    return list.slice().sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : (b.added || 0) - (a.added || 0)));
+  }
+
   root.DogLogic = {
+    fitSize, exifDate, nearestWeight, sortPhotos,
     addDays, diffDays, addMonths, ageWeeks, ageText, hasDog, careSchedule, status, mealsPerDay, toiletGapHours,
     PLANS, stepAdvice, todaysTraining, SOCIAL, socialPhase, READY,
     LEVELS, SURFACES, hourlyHeat, walkWindows, dogMod,

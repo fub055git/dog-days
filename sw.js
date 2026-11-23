@@ -1,5 +1,5 @@
 // Same pattern as the gym tracker. Bump CACHE_NAME whenever app.js, logic.js and index.html change together.
-const CACHE_NAME = 'dog-days-v3';
+const CACHE_NAME = 'dog-days-v4';
 const ASSETS = ['./', './index.html', './style.css', './logic.js', './app.js', './manifest.json', './icon.svg', './apple-touch-icon.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
