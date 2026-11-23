@@ -1,0 +1,8 @@
+{
+  "name": "dog-days",
+  "private": true,
+  "description": "Dog Days puppy PWA. No build step; the app is index.html, style.css, logic.js and app.js as they are.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  }
+}

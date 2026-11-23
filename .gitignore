@@ -1,0 +1,6 @@
+# Personal data exported from the app
+dog-days-backup-*.json
+*.ics
+
+# Local preview config
+.claude/

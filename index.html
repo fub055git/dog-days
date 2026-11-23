@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Dog Days">
+  <meta name="theme-color" content="#c2662d">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>Dog Days</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="header">
+    <div>
+      <h1 id="title">Dog Days</h1>
+      <p id="subtitle"></p>
+    </div>
+  </header>
+
+  <main id="main"></main>
+
+  <nav class="tabbar">
+    <button data-tab="today" class="active"><span>☀️</span>Today</button>
+    <button data-tab="train"><span>🎯</span>Train</button>
+    <button data-tab="care"><span>💉</span>Care</button>
+    <button data-tab="log"><span>📒</span>Log</button>
+    <button data-tab="more"><span>⚙️</span>Settings</button>
+  </nav>
+
+  <div id="sheet" class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-panel">
+      <button id="sheet-close" class="sheet-close" aria-label="Close">×</button>
+      <div id="sheet-body"></div>
+    </div>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
